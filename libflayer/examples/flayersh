@@ -1,0 +1,37 @@
+#!/usr/bin/python -i
+#
+# Copyright 2006 Will Drewry <redpig@dataspill.org>
+# Copyright 2007 Google Inc.
+# See docs/COPYING for License details (GPLv2)
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the 
+# Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+#
+
+
+__author__ = "Will Drewry"
+
+import flayer.core
+import flayer.wrappers.commandline
+import sys
+
+if __name__ == '__main__':
+  program, args = ('', [])
+  if len(sys.argv) >= 2:
+    program = sys.argv[1]
+    args = sys.argv[2:]
+  cli = flayer.wrappers.commandline.Shell(flayer.core.Flayer(program, args))
+  cli.Export()
+  cli.Banner()

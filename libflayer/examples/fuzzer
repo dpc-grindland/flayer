@@ -1,0 +1,108 @@
+#!/usr/bin/python
+# A dumb example of an automated fuzzer.
+#
+# Copyright 2006 Will Drewry <redpig@dataspill.org>
+# Copyright 2007 Google Inc.
+# See docs/COPYING for License details (GPLv2)
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the 
+# Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+#
+
+
+__author__ = "Will Drewry"
+
+"""implements an automated fuzzer using flayer"""
+
+import flayer.core
+import flayer.input.fuzz
+import os
+import random
+import subprocess
+
+class Fuzzer:
+  def __init__(self, program, args=[], env={}, libtaint=''):
+    self._program = program
+    self._args = args
+    self._env = env
+    self._flayer = flayer.core.Flayer(program, args, env, libtaint)
+    self._input = flayer.input.fuzz.FuzzFile()
+    self._altered = {}
+    self._cond_input = random.Random()
+
+  def set_seed(self, seed=0):
+    self._input.set_seed(seed)
+    self._cond_input.seed(seed)
+
+  def get_seed(self):
+    return self._input.get_seed()
+
+  def Run(self, count=1, input_is='file', seed=None):
+    if seed is not None:
+      self._set_seed(seed)
+    # Generate input
+    print "Generating random input..."
+    self._input.Run()
+    if input_is == 'file':
+      args.append(self._input.get_target())
+      self._flayer.set_command(self._program,
+                               self._args,
+                               self._env)
+    self._flayer.set_taint('f')
+    self._flayer.set_taint_file_filter(self._input.get_target())
+
+    runs = 0
+    while runs < count:
+      runs += 1
+      lead = "== %d ==" % runs
+      altered = ','.join(["%s:%d" % (a[0],a[1]) for a in self._altered.items()])
+      print "%s altered: %s" % (lead, altered)
+      process = self._flayer.Run()
+      process.stdin.close()
+      #process.stdout.close() # Write stdout to a log...
+      ret, ret = os.wait()
+      print "%s return code %d" % (lead, ret)
+      self._flayer.ProcessLastRun()
+      errors = self._flayer.Errors()
+      # Fuzz paths while keeping constant fuzz input.
+      # Set up for next run
+      #last_altered = copy.copy(self._altered)
+      for e in errors.items():
+        # Look for one hit wonders
+        if e[1].kind == 'TaintedCondition' and e[1].count == 1: 
+            action = self._cond_input.choice([True, False])
+            ip = e[1].frames[0].instruction_pointer
+            self._altered[ip] = action
+            self._flayer.add_branch_alteration(ip, action)
+      for address in self._altered.keys():
+        self._flayer.del_branch_alteration(address)
+        action = self._cond_input.choice([True, False])
+        self._altered[address] = action
+        self._flayer.add_branch_alteration(address, action)
+
+
+
+if __name__ == '__main__':
+  import sys
+  runs = sys.argv[1]
+  seed = sys.argv[2]
+  program = sys.argv[3]
+  args = sys.argv[4:]
+  fuzzer = Fuzzer(program, args, libtaint='/home/wad/sync/bzr/flayer/libtaint/libtaint.so.1.0')
+  fuzzer.set_seed(seed)
+  fuzzer.Run(count=runs)
+
+
+
