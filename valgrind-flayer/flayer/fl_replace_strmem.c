@@ -10,8 +10,7 @@
    This file is part of Flayer, a heavyweight Valgrind tool for
    tracking marked/tainted data through memory.
 
-   Copyright (C) 2006,2007 Will Drewry <redpig@dataspill.org>
-   Some portions copyright (C) 2007 Google Inc.
+   Copyright (C) 2006-2007 Google Inc. (Will Drewry)
 
    Based heavily on MemCheck by jseward@acm.org
    MemCheck: Copyright (C) 2000-2007 Julian Seward

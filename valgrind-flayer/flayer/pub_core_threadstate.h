@@ -7,6 +7,7 @@
    --------------
    Note: this was copied from ../coregrind to expose needed architecture
    state in order to instrument system calls effectively.
+   -- Will Drewry
    --------------
 
    This file is part of Valgrind, a dynamic binary instrumentation
