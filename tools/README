@@ -1,0 +1,11 @@
+This directory contains helper tools for use with Flayer:
+
+* mkf/
+  mkf is simple ptrace-based loader.  It takes the same arguments as
+  flayer (--alter-branch and --alter-fn) and attempts to perform the
+  same behavioral modification directly to the target application.
+  This allows for application testing without all the overhead of
+  Valgrind/Flayer but with error checking removed.
+  Note: All x86 conditional jump instructions probably haven't been handled
+        yet.  Please post an issue if you run in to an unhandled one!
+
