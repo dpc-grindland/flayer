@@ -1,0 +1,49 @@
+MKF v0.0.1
+Will Drewry <wad@gmail.com>
+Copyright 2007 Google Inc.
+
+DISCLAIMER
+----------
+
+This software is a proof of concept.  It is not pretty, but it is functional.
+Use at your own risk.  If you'd like to make it better, submit patches and
+feedback!
+
+
+License
+-------
+
+All included source, unless otherwise noted, is released on the GPL version 2.
+See COPYING for details.
+
+Summary
+-------
+
+MKF is a binary runtime patching utility meant for use with
+Flayer.  It takes the following arguments:
+  --alter-branch=address:value[,address:value,...] [-b]
+    Takes in the hex address and a 32-bit value. When the value
+    is non-zero, the conditional jump at the given address is forced.
+    When the value is zero, the conditional jump is disabled.
+    A list of address:value pairs may be supplied.
+  --alter-fn=address:value[,address:value,...] [-f]
+    Takes in the hex address and a 32-bit value. The nearest call
+    instruction will be disabled and the value of EAX will be set to
+    the given value.  A list of address:value pairs may be supplied.
+
+MKF's primary purpose is to speed up testing.  If you're using Flayer for fuzz
+testing, you won't want the overhead of performing each test case _under_
+Flayer after you've removed the sanity and error checking from the target
+application.  That's where MKF comes in.  Run MKF with the same arguments given
+to Flayer, and it removes the running overhead Flayer introduces.
+
+
+Caveats
+-------
+
+Note, sometimes the branch behavior is different when using MKF versus Flayer.
+If your --alter-branch arguments are behaving exactly the same way, try
+flipping the value (1 instead of 0 or the converse).  If that doesn't do it,
+fiule a bug!  You've probably hit an x86 conditional jump instruction that MKF
+doesn't yet support!
+
