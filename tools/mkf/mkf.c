@@ -1,4 +1,4 @@
-/* mkf.c - an executable runtime patcher
+/* mkf.c - an executable runtime patcher for x86/linux
  *         Will Drewry <wad@gmail.com>
  *
  * To compile:
@@ -7,11 +7,8 @@
  *   mkf --alter-branch=0x804321:1 --alter-fn=0x8093266:100 target arg1 arg2
  *
  * TODO:
- * - Determine if any synchronization is needed to ensure that PTRACE_ATTACH
- *   occurs before the execv()
- * - Check for target binary's existence
  * - Read ELF header from the target file instead of memory
- * - Add more jump instructions
+ * - Support more jump instructions
  *
  *   Copyright (C) 2006-2007 Google Inc. (Will Drewry)
  *
@@ -39,6 +36,8 @@
 #include <assert.h>
 #include <ctype.h>
 #include <getopt.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -47,13 +46,14 @@
 #include <string.h>
 #include <sys/ptrace.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #include <linux/user.h>
 #include <linux/elf.h>
 
-static const char version[] = "0.1.0";
+static const char version[] = "0.1.1";
 
 typedef enum {ALTER_BRANCH, ALTER_FUNCTION} alter_type;
 typedef struct _alter_t {
@@ -80,23 +80,25 @@ void print_version() {
 void print_help() {
   print_version();
   printf("\n"
+         "mkf [arguments] /full/path/to/binary [arguments]\n"
+         "\n"
          "MKF is a binary runtime patching utility meant for use with\n"
          "Flayer.\n"
          "\n"
          "Arguments:\n"
-         "  --alter-branch=address:value[,address:value,...] [-b]\n"
-         "    Takes in the hex address and a 32-bit value. When the value\n"
-         "    is non-zero, the conditional jump at the given address is forced.\n"
-         "    When the value is zero, the conditional jump is disabled.\n"
-         "    A list of address:value pairs may be supplied.\n"
-         "  --alter-fn=address:value[,address:value,...] [-f]\n"
-         "    Takes in the hex address and a 32-bit value. The nearest call\n"
-         "    instruction will be disabled and the value of EAX will be set to\n"
-         "    the given value.  A list of address:value pairs may be supplied.\n"
-         "  --version [-v]\n"
-         "    displays the version information\n"
-         "  --help [-h]\n"
-         "    displays this message\n"
+         "--alter-branch=address:value[,address:value,...] [-b]\n"
+         "  Takes in the hex address and a 32-bit value. When the value\n"
+         "  is non-zero, the conditional jump at the given address is forced.\n"
+         "  When the value is zero, the conditional jump is disabled.\n"
+         "  A list of address:value pairs may be supplied.\n"
+         "--alter-fn=address:value[,address:value,...] [-f]\n"
+         "  Takes in the hex address and a 32-bit value. The nearest call\n"
+         "  instruction will be disabled and the value of EAX will be set to\n"
+         "  the given value.  A list of address:value pairs may be supplied.\n"
+         "--version [-v]\n"
+         "  displays the version information\n"
+         "--help [-h]\n"
+         "  displays this message\n"
          "\n\n");
   return;
 }
@@ -163,7 +165,7 @@ long ptrace_inject(pid_t child, long addr, void *src, size_t len) {
       //  cursor[i], cursor[i+1], cursor[i+2], cursor[i+3], value);
 
       ret = ptrace(PTRACE_POKEDATA, child, addr+i, value);
-      if (ret == -1) perror("[error] ptrace");
+      if (ret == -1) perror("[error:ptrace_inject] ptrace");
     }
 
     if (code) free(code);
@@ -280,7 +282,9 @@ bool patch_long_jump(pid_t pid, unsigned int address, long value) {
    * than actually following it.
    */
   static const unsigned char longjmp_fail[] = {0x90, 0xe9};
-  static const unsigned char longjmp_pass[] = {0x90, 0x90, 0x90, 0x90, 0x90, 0x90};
+  static const unsigned char longjmp_pass[] = {
+    0x90, 0x90, 0x90, 0x90, 0x90, 0x90
+  };
   return patch_jump(pid, address, value,
                     longjmp_pass, sizeof(longjmp_pass),
                     longjmp_fail, sizeof(longjmp_fail));
@@ -293,7 +297,7 @@ bool patch_long_jump(pid_t pid, unsigned int address, long value) {
  * application.  The value moved into EAX is specified as an argument.
  */
 bool patch_function(pid_t pid, unsigned int address, long value) {
-  /* Not a const as te EAX value will be overwritten */
+  /* Not a const as the EAX value will be overwritten */
   static unsigned char fn_code[] = {0xB8, 0x00, 0x0, 0x0, 0x0};
 
   /* Write in new EAX value */
@@ -322,13 +326,15 @@ bool perform_alterations(pid_t pid, const alter_t *alterations, size_t count) {
         switch (get_jump_type(pid, entry->address)) {
           case JUMP_SHORT:
               if (!patch_short_jump(pid, entry->address, entry->value)) {
-                fprintf(stderr, "[error] failed to inject code at %x.\n", entry->address);
+                fprintf(stderr, "[error] failed to inject code at %x.\n",
+                  entry->address);
                 continue;
               }
             break;
           case JUMP_LONG:
               if (!patch_long_jump(pid, entry->address, entry->value)) {
-                fprintf(stderr, "[error] failed to inject code at %x.\n", entry->address);
+                fprintf(stderr, "[error] failed to inject code at %x.\n",
+                  entry->address);
                 continue;
               }
             break;
@@ -350,7 +356,8 @@ bool perform_alterations(pid_t pid, const alter_t *alterations, size_t count) {
           continue;
         }
         if (!patch_function(pid, real_address, entry->value)) {
-          fprintf(stderr, "[error] failed to inject code at %x.\n", real_address);
+          fprintf(stderr, "[error] failed to inject code at %x.\n",
+            real_address);
           continue;
         }
         break;
@@ -376,22 +383,26 @@ bool perform_alterations(pid_t pid, const alter_t *alterations, size_t count) {
  *
  * XXX: consider adding a breakpoint in dl_open to remedy this.
  */
-bool breakpoint_and_wait(pid_t pid, unsigned int address) { static const long
-breakpoint_code = 0xCCCCCCCC; struct user_regs_struct regs = {0}; long original
-= 0, res = 0; int status = 0;
+bool breakpoint_and_wait(pid_t pid, Elf32_Addr address) {
+  static const long breakpoint_code = 0xCCCCCCCC;
+  struct user_regs_struct regs = {0};
+  long original = 0, res = 0;
+  int status = 0;
 
   /* Grab the original instructions at address */
   original = ptrace(PTRACE_PEEKTEXT, pid, address, NULL);
   /* Replace them with 4 breakpoint instructions */
   res = ptrace(PTRACE_POKETEXT, pid, address, breakpoint_code);
   if (res == -1) {
-    perror("[error] ptrace");
+    fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+      __func__, __LINE__, strerror(errno));
     return false;
   }
   /* Wait for them to be triggered */
   res = ptrace(PTRACE_CONT, pid, NULL, NULL);
   if (res == -1) {
-    perror("[error] ptrace");
+    fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+      __func__, __LINE__, strerror(errno));
     return false;
   }
   res = waitpid(pid, &status, 0);
@@ -402,17 +413,20 @@ breakpoint_code = 0xCCCCCCCC; struct user_regs_struct regs = {0}; long original
   /* Replace the original code */
   res = ptrace(PTRACE_POKETEXT, pid, address, original);
   if (res == -1) {
-    perror("[error] ptrace");
+    fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+      __func__, __LINE__, strerror(errno));
     return false;
   }
   /* Reset the EIP to execute the restored instructions */
   if (ptrace(PTRACE_GETREGS, pid, NULL, &regs) < 0) {
-    perror("[error] ptrace");
+    fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+      __func__, __LINE__, strerror(errno));
     return false;
   }
   regs.eip = address;
   if (ptrace(PTRACE_SETREGS, pid, NULL, &regs) < 0) {
-    perror("[error] ptrace");
+    fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+      __func__, __LINE__, strerror(errno));
     return false;
   }
   return true;
@@ -426,11 +440,11 @@ breakpoint_code = 0xCCCCCCCC; struct user_regs_struct regs = {0}; long original
  * normal commandline execution as possible.
  */
 void attach_and_patch(const char *command, char *const *args,
-                      const alter_t *alterations, size_t count) {
+                      const alter_t *alterations, size_t count,
+                      Elf32_Addr entry) {
   pid_t pid, forkret;
   siginfo_t signal = {0};
   int res = 0, status = 0;
-  Elf32_Ehdr elf;
 
   pid = getpid(); /* Find myself */
   forkret = fork();
@@ -439,6 +453,7 @@ void attach_and_patch(const char *command, char *const *args,
 
   /* Parent: we want this one to exec - not the child. */
   if (forkret != 0) {
+    usleep(5000); /* hack yield */
     execv(command, args);
     fprintf(stderr, "[error] execv failed!\n");
     return; /* only reached on execv failure. */
@@ -449,7 +464,8 @@ void attach_and_patch(const char *command, char *const *args,
   res = ptrace(PTRACE_ATTACH, pid, NULL, NULL);
   if (res == -1) {
     fprintf(stderr, "[error] failed to trace parent\n");
-    perror("[error] ptrace");
+    fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+      __func__, __LINE__, strerror(errno));
     kill(pid, SIGKILL);
     return;
   }
@@ -461,7 +477,8 @@ void attach_and_patch(const char *command, char *const *args,
   }
   if (ptrace(PTRACE_GETSIGINFO, pid, NULL, &signal) < 0) {
     fprintf(stderr, "[error] failed to acquire signal info\n");
-    perror("[error] ptrace");
+    fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+      __func__, __LINE__, strerror(errno));
     ptrace(PTRACE_KILL, pid, NULL, NULL);
     return;
   }
@@ -471,21 +488,24 @@ void attach_and_patch(const char *command, char *const *args,
     if (signal.si_signo == SIGSTOP) signal.si_signo = 0;
     res = ptrace(PTRACE_CONT, pid, NULL, signal.si_signo);
     if (res == -1) {
-      perror("[error] ptrace");
+      fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+        __func__, __LINE__, strerror(errno));
       ptrace(PTRACE_KILL, pid, NULL, NULL);
       return;
     }
     res = waitpid(pid, &status, 0);
     if (res == -1 || !WIFSTOPPED(status)) {
       fprintf(stderr, "[error] wait returned, but process not stopped\n");
-      perror("[error] ptrace");
+      fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+        __func__, __LINE__, strerror(errno));
       ptrace(PTRACE_KILL, pid, NULL, NULL);
       return;
     }
 
     if (ptrace(PTRACE_GETSIGINFO, pid, NULL, &signal) < 0) {
       fprintf(stderr, "[error] failed to acquire signal info\n");
-      perror("[error] ptrace");
+      fprintf(stderr, "[error:%s:%d] ptrace: %s\n",
+        __func__, __LINE__, strerror(errno));
       ptrace(PTRACE_KILL, pid, NULL, NULL);
       return;
     }
@@ -493,9 +513,14 @@ void attach_and_patch(const char *command, char *const *args,
 
   /* Now that we're in the target, put a breakpoint at the entry address
    * so that we know all the linked libraries are loaded. */
-  // XXX: just read this from the file */
-  ptrace_extract_chunk(pid, 0x8048000, &elf, sizeof(elf));
-  if (!breakpoint_and_wait(pid, elf.e_entry)) {
+  if (entry == (Elf32_Addr)-1) { 
+    Elf32_Ehdr elf;
+    fprintf(stderr, "[warning] extracting ELF header from live process\n");
+    ptrace_extract_chunk(pid, 0x8048000, &elf, sizeof(elf));
+    entry = elf.e_entry;
+  }
+
+  if (!breakpoint_and_wait(pid, entry)) {
     fprintf(stderr, "[error] Failed to insert and wait for breakpoint\n");
     ptrace(PTRACE_KILL, pid, NULL, NULL);
     return;
@@ -512,6 +537,46 @@ void attach_and_patch(const char *command, char *const *args,
   exit(0);
 }
 
+Elf32_Addr get_entry_point(const char *const path) {
+    int fd = open(path, O_RDONLY);
+    ssize_t bytes_read = 0;
+    Elf32_Ehdr elf;
+
+    if (fd < 0) {
+      fprintf(stderr, "[warning] failed to read executable\n");
+      return (Elf32_Addr)-1;
+    }
+
+    bytes_read = read(fd, &elf, sizeof(elf));
+    if (bytes_read < 0 || bytes_read != sizeof(elf)) {
+      fprintf(stderr, "[warning] failed to read ELF header\n");
+      close(fd);
+      return (Elf32_Addr)-1;
+    }
+    close(fd);
+    return elf.e_entry;
+}
+
+signed int command_okay(const char *const path) {
+  struct stat buf;
+  uid_t uid = getuid();
+  gid_t gid = getgid();
+  int res = stat(path, &buf);
+
+  if (res < 0)
+    return -1;
+
+  if (buf.st_mode & S_IXOTH)
+    return 0;
+
+  if (buf.st_uid == uid && buf.st_mode & S_IXUSR)
+    return 0;
+
+  if (buf.st_gid == gid && buf.st_mode & S_IXGRP)
+    return 0;
+
+  return -1;
+}
 
 int main(int argc, char **argv) {
   alter_t *alterations = NULL;
@@ -519,6 +584,7 @@ int main(int argc, char **argv) {
   size_t branch_count = 0, function_count = 0, cnt = 0;
   char *command = NULL, *const*args = NULL;
   int optindex = 0;
+  Elf32_Addr entry = -1;
   struct option longopts[] = {
     {"alter-branch", 1, NULL, 'b'}, /* alter conditional jumps */
     {"alter-fn", 1, NULL, 'f'}, /* alter calls */
@@ -631,8 +697,19 @@ int main(int argc, char **argv) {
   command = argv[optind];
   args = &argv[optind];
 
-  attach_and_patch(command, args, alterations, branch_count+function_count);
-  /* XXX: should never reach here */
+  /* check for existence */
+  if (command_okay(command) < 0) {
+    fprintf(stderr,
+      "[error] the full path to a valid executable must be specified\n");
+    return 1;
+  }
+
+  /* get the entry point from the ELF header */
+  entry = get_entry_point(command);
+
+  attach_and_patch(command, args, alterations, branch_count+function_count,
+    entry);
+
   return -1;
 }
 
