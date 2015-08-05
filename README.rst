@@ -1,25 +1,19 @@
+========================================
+Flayer
+========================================
+
 Flayer & LibFLayer
+
 Will Drewry <wad@gmail.com>, Tavis Ormandy <taviso@gmail.com>
+
 Copyright 2007 Google Inc.
 
-DISCLAIMER
-----------
 
-This software is a proof of concept.  It is not pretty, but it is functional.
-Use at your own risk.  If you'd like to make it better, submit patches and
-feedback!
-
-
-License
--------
-
-All included source, unless otherwise noted, is released on the GPL version 2.
-See docs/COPYING for details.
 
 Quick summary
--------------
+========================================
 
-Flayer is a valgrind plugin   It implements taint tracing and throws
+Flayer is a valgrind plugin. It implements taint tracing and throws
 information errors when tainted information is used in a conditional or system
 call.  In addition, strlen, strcmp, and other string/memory-related functions
 will also throw a "client check" error where forced tainting is used to taint
@@ -28,7 +22,9 @@ the output of those functions.
 Using this output, Flayer can forcibly bypass conditional jumps and/or step
 over function calls.
 
-  $ valgrind --tool=flayer --help
+.. code-block::sh
+
+    $ valgrind --tool=flayer --help
     ......
     ......
     User options for Flayer:
@@ -47,13 +43,14 @@ over function calls.
 
 
 
-
 Installing Flayer
-------------
+========================================
 
-If you check out the source from subversion, you can build by running:
+you can build by running:
 
-  ./configure &&  make &&  make install
+.. code-block:: sh
+
+    ./configure &&  make &&  make install
 
 Despite valgrind supporting multiple architectures, currently Flayer only works
 with 32-bit x86 code.  This is due to the system call wrapping code.  If you'd
@@ -61,12 +58,31 @@ like to submit a patch to add more platforms, better system call coverage, or
 use of the valgrind syswrap code, please drop me a mail!
 
 
+
 Using LibFlayer
----------------
+========================================
 
 Currently, there is no installer for LibFlayer.  Feel free to send a patch!
 
 Until then, you can try it out by setting your PYTHONPATH. E.g.,
 
-  PYTHONPATH=/opt/libflayer /opt/libflayer/examples/flayersh
+.. code-block:: sh
 
+    PYTHONPATH=/opt/libflayer /opt/libflayer/examples/flayersh
+
+
+
+Disclaimer
+========================================
+
+This software is a proof of concept.  It is not pretty, but it is functional.
+Use at your own risk.  If you'd like to make it better, submit patches and
+feedback!
+
+
+
+License
+========================================
+
+All included source, unless otherwise noted, is released on the GPL version 2.
+See docs/COPYING for details.
